@@ -1,0 +1,108 @@
+---
+title: "Human Activity Recognition"
+author: "James Fielding"
+date: "June 17, 2015"
+output: html_document
+---
+
+```{r,echo=FALSE, results='hide', message=FALSE, warning=TRUE}
+
+file.wd <- "~/GitHub/PredMachLearn-P1"
+if(!file.exists(file.wd)) {dir.create(file.wd, recursive = TRUE)}
+setwd(file.wd)
+```
+
+##Abstract
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+---
+
+##Data Retrieval
+The data is publicly available and was downloaded as follows:
+```{r, cache=TRUE}
+suppressMessages(library(dplyr))
+
+get.data <- function (file.name, file.url) {
+    #Check if files exists, and download if necessary
+    
+    setInternet2(use = TRUE) #necessary for https in Windows OS
+    
+    if (!file.exists(file.name)) {
+        download.file(
+            file.url, destfile = file.name, method = "auto", mode = "wb"
+        )
+    }
+    
+
+    
+    tbl_df(read.csv(file.name,na.strings=c("", "NA", "NULL", "#DIV/0!"), as.is = c(3:5,7:159)))
+}
+
+training.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+pml.train <- get.data("pml-training.csv",training.url)
+```
+
+Initially there were `r nrow(pml.train)` observations of `r ncol(pml.train)` variables in the training dataset, including the `classe` variable that denotes the manner in which the observation subject did the observed exercise.
+
+To reduce the potential for confounding variables being included in prediction model, the first seven variables were removed as the are participant and setup data, as opposed to accelerometer measurements.
+```{r}
+pml.train <- select(pml.train, -c(1:7))
+
+pml.train <- pml.train[,colSums(is.na(pml.train))==0]
+pml.train <- pml.train[,colSums(is.na(pml.train)) != nrow(pml.train)]
+
+as.numeric.factor <- function(x) {as.numeric(levels(x))[x]}
+
+mydata <- pml.train
+pml.train <- mydata
+
+pml.train <- pml.train[complete.cases(pml.train),]
+
+pml.class <- c()
+for (i in 1:183) {
+     if (nlevels(pml.train[[i]]) > 2) {
+    myclass <- c(myclass,class(pml.train[[i]])
+}
+
+    
+    
+factor32 <- c()
+for (i in 1:159) {
+    if (nlevels(pml.train[[i]]) > 2) {
+        #as.character(levels(pml.train[[i]]))[pml.train[[i]]]
+        #as.character(pml.train[[i]])
+        #as.numeric.factor(pml.train[[i]])
+        #sub("^#DIV\\/0!$",NaN, pml.train[[i]], ignore.case = TRUE)
+        #sub("^$",NA, pml.train[[i]], ignore.case = TRUE)
+        #as.numeric(pml.train[[i]])
+        factor32 <- c(factor32, i)
+    }
+}
+
+pml.train[pml.train=="#DIV/0!"]<-NaN
+```
+
+```{r}
+suppressMessages(library(caret))
+
+set.seed(123355)     
+trainIndex <- createDataPartition(pml.train$classe, p=0.70, list=FALSE)
+training<- pml.train[trainIndex,]
+testing<- pml.train[-trainIndex,]
+
+```
+
+##Modeling
+```{r}
+suppressMessages(library(randomForest))
+
+modelFit <-randomForest(classe ~., data = training, importance = TRUE)
+print(modelFit)
+
+#str(modelFit$importance)
+prediction <- predict(modelFit, testing)
+testing$rightPred <- prediction == testing$classe
+accuracy <- sum(testing$rightPred)/nrow(testing)
+accuracy
+```
