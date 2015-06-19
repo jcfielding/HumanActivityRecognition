@@ -2,7 +2,10 @@
 title: "Human Activity Recognition"
 author: "James Fielding"
 date: "June 17, 2015"
-output: html_document
+output: 
+  html_document: 
+    theme: cerulean
+    toc: yes
 ---
 
 ```{r,echo=FALSE, results='hide', message=FALSE, warning=TRUE}
@@ -14,12 +17,12 @@ setwd(file.wd)
 
 ##Abstract
 
-Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behaviour, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
 
 ---
 
 ##Data Retrieval
-The data is publicly available and was downloaded as follows:
+The data was available via download and was downloaded as follows:
 ```{r, cache=TRUE}
 suppressMessages(library(dplyr))
 
@@ -34,75 +37,84 @@ get.data <- function (file.name, file.url) {
         )
     }
     
+pml.asis <- c(3:5,7:13,15:16,18:25,27:88,90:91,93:100,102:126,128:129,131:138,140:159)
 
-    
-    tbl_df(read.csv(file.name,na.strings=c("", "NA", "NULL", "#DIV/0!"), as.is = c(3:5,7:159)))
+    tbl_df(read.csv(file.name,na.strings=c("", "NA", "NULL", "#DIV/0!"), as.is = pml.asis))
+    tbl_df(read.csv(file.name,na.strings=c("", "NA", "NULL")))
 }
 
 training.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
 pml.train <- get.data("pml-training.csv",training.url)
+
 ```
 
 Initially there were `r nrow(pml.train)` observations of `r ncol(pml.train)` variables in the training dataset, including the `classe` variable that denotes the manner in which the observation subject did the observed exercise.
 
-To reduce the potential for confounding variables being included in prediction model, the first seven variables were removed as the are participant and setup data, as opposed to accelerometer measurements.
+##Data Preprocessing
+To reduce the potential for confounding variables being included in prediction model, the first seven variables were removed as the are participant and setup data, as opposed to accelerometer measurements. Next, any variables that had 5% or more NA values were removed. Finally, to remove any rows that still contained NA's were removed, as some prediction methods cannot handle NA values.
 ```{r}
-pml.train <- select(pml.train, -c(1:7))
-
-pml.train <- pml.train[,colSums(is.na(pml.train))==0]
-pml.train <- pml.train[,colSums(is.na(pml.train)) != nrow(pml.train)]
-
-as.numeric.factor <- function(x) {as.numeric(levels(x))[x]}
-
-mydata <- pml.train
-pml.train <- mydata
-
-pml.train <- pml.train[complete.cases(pml.train),]
-
-pml.class <- c()
-for (i in 1:183) {
-     if (nlevels(pml.train[[i]]) > 2) {
-    myclass <- c(myclass,class(pml.train[[i]])
+pre.process <- function (dataset) {
+  dataset <- select(dataset, -c(1:7))
+  dataset <- dataset[,colSums(is.na(dataset)) <= 0.95 *  nrow(dataset)]
+  dataset <- dataset[complete.cases(dataset),]
+  return(dataset)
 }
 
-    
-    
-factor32 <- c()
-for (i in 1:159) {
-    if (nlevels(pml.train[[i]]) > 2) {
-        #as.character(levels(pml.train[[i]]))[pml.train[[i]]]
-        #as.character(pml.train[[i]])
-        #as.numeric.factor(pml.train[[i]])
-        #sub("^#DIV\\/0!$",NaN, pml.train[[i]], ignore.case = TRUE)
-        #sub("^$",NA, pml.train[[i]], ignore.case = TRUE)
-        #as.numeric(pml.train[[i]])
-        factor32 <- c(factor32, i)
-    }
-}
+pml.train <- pre.process(pml.train)
 
-pml.train[pml.train=="#DIV/0!"]<-NaN
 ```
 
+Finally, the data was divided into training and testing sets:
 ```{r}
 suppressMessages(library(caret))
 
-set.seed(123355)     
+set.seed(12345)     
 trainIndex <- createDataPartition(pml.train$classe, p=0.70, list=FALSE)
 training<- pml.train[trainIndex,]
 testing<- pml.train[-trainIndex,]
-
 ```
 
 ##Modeling
+Random Forest was chosen as the method to build the prediction mode.
 ```{r}
 suppressMessages(library(randomForest))
+```
+An attempt to fit the model was done using the carat package. Unfortunately, this method was eventually stopped because was taking an excessive amount of time.
+```{r, eval= FALSE, cache = TRUE}
 
-modelFit <-randomForest(classe ~., data = training, importance = TRUE)
-print(modelFit)
+controlObject <- trainControl(verboseIter = TRUE)
+modelFitCar <- train(classe~ .,data=training , method = "rf", tuneLength = 10,
+             ntrees = 100, importance = TRUE, prox=TRUE,
+             trControl = controlObject)
+```
 
-#str(modelFit$importance)
-prediction <- predict(modelFit, testing)
-testing$rightPred <- prediction == testing$classe
-accuracy <- sum(testing$rightPred)/nrow(testing)
+```{r, cache = TRUE}
+modelFitRf <-randomForest(classe ~., data = training, importance = TRUE)
+names(modelFitRf)
+```
+The out-of-bag (OOB) of 0.58% for the model seemed very promising.
+
+The hope was for the model to achieve at least a 95% prediction accuracy. The model was used to predict the testing set and the cross-validation accuracy was calculated as follows:
+```{r}
+prediction <- predict(modelFitRf, testing)
+testing$correctPred <- prediction == testing$classe
+accuracy <- sum(testing$correctPred)/nrow(testing)
 accuracy
 ```
+With an accuracy of `sprintf("%1.2f%%", 100*accuracy)` on the testing set (and an error rate of `sprintf("%1.2f%%", 100*(1-accuracy))`), the model met the requirements to proceed.
+
+##Predictions
+The submission dataset was obtained:
+```{r}
+testing.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+pml.test <- get.data("pml-testing.csv",testing.url)
+```
+
+Finally, the submission predictions were established:
+```{r}
+submission <- predict(modelFitRf, pml.test)
+submission
+```
+
+##Conclusion
+The model obtained ended up being highly successful for submission purposes. Going forward, it would be interesting to tune and compare the carat train function with the randomForest function used in the submission for accuracy and time to execute.
