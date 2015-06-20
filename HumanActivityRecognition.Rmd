@@ -2,8 +2,10 @@
 title: "Human Activity Recognition"
 author: "James Fielding"
 date: "June 17, 2015"
-output: 
-  html_document: 
+output:
+  pdf_document:
+    toc: yes
+  html_document:
     theme: cerulean
     toc: yes
 ---
@@ -13,17 +15,27 @@ output:
 file.wd <- "~/GitHub/PredMachLearn-P1"
 if(!file.exists(file.wd)) {dir.create(file.wd, recursive = TRUE)}
 setwd(file.wd)
+
+# enable multi-core processing
+library(doParallel)
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+
 ```
 
 ##Abstract
 
-Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behaviour, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+In the last few years, Human Activity Recognition (HAR) has emerged as a key research area given the increased availability and declining costs of devices such as Jawbone Up, Nike FuelBand, and Fitbit. It is now possible to collect a large amount of data about personal activity for very little cost. There are many potential applications for HAR including: elderly monitoring, life log systems for monitoring energy expenditure and for supporting weight-loss programs, and digital assistants for weight lifting exercises.
+
+This analysis used data previously collected from accelerometers on the belt, forearm, arm, and dumbbell of 6 subjects when performing barbell lifts in 5 different ways (sitting-down, standing-up, standing, walking, and sitting). The goal was to created a model that predicted the correct position of a subject for a given set of measurements.
+
+Upon completion, this analysis produced a predictive model that was accurate (99%), as well as a submission output for the Practical Machine Learning course.
 
 ---
 
 ##Data Retrieval
-The data was available via download and was downloaded as follows:
-```{r, cache=TRUE}
+The data was available via download and was obtained as follows:
+```{r, Retrieval, cache=TRUE}
 suppressMessages(library(dplyr))
 
 get.data <- function (file.name, file.url) {
@@ -37,10 +49,11 @@ get.data <- function (file.name, file.url) {
         )
     }
     
-pml.asis <- c(3:5,7:13,15:16,18:25,27:88,90:91,93:100,102:126,128:129,131:138,140:159)
+pml.asis <- c(3:5,7:13,15:16,18:25,27:88,90:91,
+              93:100,102:126,128:129,131:138,140:159)
 
-    tbl_df(read.csv(file.name,na.strings=c("", "NA", "NULL", "#DIV/0!"), as.is = pml.asis))
-    tbl_df(read.csv(file.name,na.strings=c("", "NA", "NULL")))
+    tbl_df(read.csv(file.name,na.strings=c("", "NA", "NULL", "#DIV/0!"),
+                    as.is = pml.asis))
 }
 
 training.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
@@ -48,13 +61,15 @@ pml.train <- get.data("pml-training.csv",training.url)
 
 ```
 
-Initially there were `r nrow(pml.train)` observations of `r ncol(pml.train)` variables in the training dataset, including the `classe` variable that denotes the manner in which the observation subject did the observed exercise.
+By default, R factored many of the variables. To override this default behavior, a `as.is` vector was added. Initially there were `r nrow(pml.train)` observations of `r ncol(pml.train)` variables in the training dataset, including the `classe` variable that denotes the manner in which the observation subject did the observed exercise.
 
 ##Data Preprocessing
-To reduce the potential for confounding variables being included in prediction model, the first seven variables were removed as the are participant and setup data, as opposed to accelerometer measurements. Next, any variables that had 5% or more NA values were removed. Finally, to remove any rows that still contained NA's were removed, as some prediction methods cannot handle NA values.
+To reduce the potential for confounding variables being included in prediction model, the first seven variables were removed as they were determined to be participant and setup data, as opposed to accelerometer measurements. Next, any variables that had 5% or more NA values were removed. Finally, remove rows that still contained NA's were removed, as some random forest prediction methods cannot handle NA values by default.
+
 ```{r}
+
 pre.process <- function (dataset) {
-  dataset <- select(dataset, -c(1:7))
+  dataset <- dataset[, -c(1:7)]
   dataset <- dataset[,colSums(is.na(dataset)) <= 0.95 *  nrow(dataset)]
   dataset <- dataset[complete.cases(dataset),]
   return(dataset)
@@ -65,6 +80,7 @@ pml.train <- pre.process(pml.train)
 ```
 
 Finally, the data was divided into training and testing sets:
+
 ```{r}
 suppressMessages(library(caret))
 
@@ -75,46 +91,80 @@ testing<- pml.train[-trainIndex,]
 ```
 
 ##Modeling
-Random Forest was chosen as the method to build the prediction mode.
-```{r}
+Random Forest was chosen as the method to build the prediction mode, given the large number of variables with incremental differences.
+
+An attempt to fit a model was done using the `train` function of the carat package. Unfortunately, this method was eventually terminated because of the excessive amount of processing time without completion.
+
+```{r, modelFitCar, eval= FALSE, cache = TRUE}
+
+controlObject <- trainControl(verboseIter = TRUE, method = "repeatedcv",
+                           number = 10, ## repeated ten times
+                           repeats = 10)
+modelFitCar <- train(classe~ .,data=training , method = "rf",
+                     tuneLength = 10, ntrees = 500, importance = TRUE,
+                     prox=TRUE, trControl = controlObject)
+```
+
+The `randomForest` function was initially used with `proximity = TRUE` to produce a 1.4 Gb model with 99.2% accuracy. Given the time and memory required to utilize this model, a second model was produced using `proximity = FALSE` to produce the final model:
+
+```{r, modelFitRf, cache = TRUE}
 suppressMessages(library(randomForest))
-```
-An attempt to fit the model was done using the carat package. Unfortunately, this method was eventually stopped because was taking an excessive amount of time.
-```{r, eval= FALSE, cache = TRUE}
-
-controlObject <- trainControl(verboseIter = TRUE)
-modelFitCar <- train(classe~ .,data=training , method = "rf", tuneLength = 10,
-             ntrees = 100, importance = TRUE, prox=TRUE,
-             trControl = controlObject)
+modelFitRf <-randomForest(classe ~., data = training, ntree=500,
+                          importance = TRUE, proximity = FALSE)
+modelFitRf
 ```
 
-```{r, cache = TRUE}
-modelFitRf <-randomForest(classe ~., data = training, importance = TRUE)
-names(modelFitRf)
+The model produced was a very reasonable 27.5 Mb. The out-of-bag (OOB) error of 0.58% for the model seemed very promising. As such, the model's error vs. number of trees was graphed:
+
+```{r,ErrorVsTrees,cache = TRUE}
+with(modelFitRf, plot(modelFitRf, log = "y", main = "Final random forest model error vs. trees"))
 ```
-The out-of-bag (OOB) of 0.58% for the model seemed very promising.
+
+As a result of the plot above, a second model using `ntree=200` was created using the `randomForest` function. Although it was only 13.4 Mb is size, it was determined to be slightly less accurate (0.1%). As such, the first model was used as the final model, given that it was already produced.
+
+```{r,VarImp,cache = TRUE}
+varImpPlot(modelFitRf, n.var = 10, main = "Top 10 variables in final model" )
+```
+
+The variable importance plot above showed that the yaw\_belt measurements were most important for accuracy, whereas the roll\_belt had the largest effect on the homogeneity of the nodes and leaves in the resulting random forest (Gini coefficient).   
 
 The hope was for the model to achieve at least a 95% prediction accuracy. The model was used to predict the testing set and the cross-validation accuracy was calculated as follows:
+
 ```{r}
 prediction <- predict(modelFitRf, testing)
 testing$correctPred <- prediction == testing$classe
 accuracy <- sum(testing$correctPred)/nrow(testing)
 accuracy
 ```
-With an accuracy of `sprintf("%1.2f%%", 100*accuracy)` on the testing set (and an error rate of `sprintf("%1.2f%%", 100*(1-accuracy))`), the model met the requirements to proceed.
+
+With an accuracy of `r sprintf("%1.2f%%", 100*accuracy)` on the testing set (and an error rate of `r sprintf("%1.2f%%", 100*(1-accuracy))`), the model met the requirements to proceed.
 
 ##Predictions
 The submission dataset was obtained:
+
 ```{r}
 testing.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
 pml.test <- get.data("pml-testing.csv",testing.url)
 ```
 
 Finally, the submission predictions were established:
+
 ```{r}
 submission <- predict(modelFitRf, pml.test)
 submission
 ```
 
 ##Conclusion
-The model obtained ended up being highly successful for submission purposes. Going forward, it would be interesting to tune and compare the carat train function with the randomForest function used in the submission for accuracy and time to execute.
+The model obtained ended up being highly successful for submission purposes. Going forward, it would be interesting to properly tune the carat `rf` method to reduce processing times and allow the train function to be compared with the `randomForest` function used in the submission, for accuracy and time to execute.
+
+```{r, echo=FALSE}
+# The stopCluster is necessary to terminate the extra processes
+stopCluster(cl)
+```
+
+---
+
+##References
+
+Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6. 
+
